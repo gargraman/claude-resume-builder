@@ -1,0 +1,23 @@
+{
+  "name": "resume-builder",
+  "description": "Tailors resumes for specific job descriptions with ATS keyword optimization, adjacent skill inference, gap analysis, and professional rewriting",
+  "version": "1.0.0",
+  "author": {
+    "name": "Raman Garg"
+  },
+  "homepage": "https://github.com/gargraman/claude-resume-builder-skill",
+  "repository": "https://github.com/gargraman/claude-resume-builder-skill",
+  "license": "MIT",
+  "keywords": [
+    "resume",
+    "cv",
+    "job-search",
+    "ats",
+    "career",
+    "tailoring",
+    "applicant-tracking-system",
+    "job-description",
+    "skill-inference",
+    "interview-prep"
+  ]
+}
