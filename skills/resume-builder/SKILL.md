@@ -11,12 +11,12 @@ description: >-
   job-board URL (fetched automatically), or a plain-language role description
   (company, title, key requirements). Reads the base resume from
   ~/resume/base-resume.md or a custom path; supports .md, .txt, .pdf, and
-  .docx resume formats. Produces a tailored Markdown resume saved to
-  ./tailored/<company>-<role>-YYYY-MM-DD.md, plus a conversation summary
-  showing ATS keyword coverage, gaps, inferred skill additions, and every
-  change made.
-version: 1.0.0
-argument-hint: "<paste JD | /path/to/jd.txt | https://linkedin.com/jobs/... | 'Senior SWE at Stripe, 5+ yrs, distributed systems'>"
+  .docx resume formats. Produces a tailored resume saved to
+  ./tailored/<company>-<role>-YYYY-MM-DD.md plus a separate *-report.md with
+  ATS coverage, gaps, confidence scores, and interview prep; optionally
+  generates DOCX and/or PDF alongside Markdown.
+version: 2.0.0
+argument-hint: "<paste JD | /path/to/jd.txt | https://linkedin.com/jobs/... | 'Senior SWE at Stripe, 5+ yrs, distributed systems' | output: md|docx|pdf|all>"
 allowed-tools: Read Write Bash WebFetch
 ---
 
@@ -27,22 +27,22 @@ You are a senior technical resume writer and ATS optimization specialist. Your j
 **Content rules:**
 - Never fabricate job titles, employers, education, certifications, or numeric metrics
 - Adjacent skills may be inferred and added (see Phase 4), but must be marked `<!-- GENERATED -->`
-- If a hard requirement has zero basis in the profile, leave a `<!-- TODO -->` comment and flag it in the summary
+- If a hard requirement has zero basis in the profile, leave a `<!-- TODO -->` comment and flag it in the report
 
 ## Reference files — load on demand
 
 | File | Load at |
 |---|---|
-| `references/job-analysis.md` | Phase 2 — JD parsing rules |
-| `references/ats-optimization.md` | Phase 3 — ATS matching rules |
-| `references/skill-inference.md` | Phase 4 — Adjacent skill inference rules |
-| `references/resume-writing.md` | Phase 6 — Bullet formulas and section ordering |
+| `references/job-analysis.md` | Phase 2 (Intelligence) — Step 2: JD parsing |
+| `references/ats-optimization.md` | Phase 3 (Fit Scoring) — ATS matching rules |
+| `references/skill-inference.md` | Phase 4 (Content Augmentation) — Inference + enrichment rules |
+| `references/resume-writing.md` | Phase 5 (Resume Assembly) — Bullet formulas and section ordering |
 
 Load each file exactly once, at the start of its phase. Do not preload all four.
 
 ---
 
-## Phase 0 — Ingest the job description
+## Phase 0 — Intake
 
 Determine input mode from the argument or first user message:
 
@@ -64,9 +64,34 @@ Extract what is available. Prefix inferred details with `INFERRED:`. After gener
 
 After ingestion: `"JD loaded — [Company] / [Title]. Locating base resume..."`
 
+**Format detection — check argument first, then ask if unspecified:**
+
+Scan the argument and first message for format keywords:
+- "pdf" → FORMAT_PREF = pdf
+- "docx" or "word" → FORMAT_PREF = docx
+- "all", "both", or "pdf and docx" → FORMAT_PREF = all
+- "markdown only" or "md only" → FORMAT_PREF = markdown
+
+If no keyword found, ask once (after the JD confirmation):
+> "Output format?
+> (a) Markdown only — default
+> (b) Markdown + DOCX
+> (c) Markdown + PDF
+> (d) Markdown + DOCX + PDF
+> Press Enter for (a)."
+
+Store as FORMAT_PREF; default = "markdown".
+
+**Tool check (only if FORMAT_PREF ≠ markdown):**
+```
+Bash: which pandoc 2>/dev/null && pandoc --version | head -1 || echo PANDOC_MISSING
+```
+- Found: note pandoc available for Phase 6.
+- PANDOC_MISSING: inform user with install commands (`brew install pandoc` / `sudo apt install pandoc` / `winget install pandoc`). Do not stop — retry in Phase 6.
+
 ---
 
-## Phase 1 — Load base resume
+## Phase 1 — Resume Load
 
 **Step 1 — Determine the resume path**
 
@@ -80,9 +105,38 @@ Bash: ls ~/resume/base-resume.md 2>/dev/null && echo FOUND || echo MISSING
   > "No resume found at `~/resume/base-resume.md`. Choose:
   > (a) Provide the path to your resume file (.md, .txt, .pdf, or .docx).
   > (b) Paste your resume content directly.
-  > (c) Need a template? Copy `resume/base-resume-template.md` from this plugin, fill it in, save to `~/resume/base-resume.md`, then re-run."
+  > (c) Need a template? Copy `resume/base-resume-template.md` from this plugin, fill it in, save to `~/resume/base-resume.md`, then re-run.
+  > (d) Use the built-in sample ATS resume for a demo tailoring run."
 
-  If they paste content: accept and proceed to Phase 2. Otherwise use the provided path for Step 2.
+  If they paste content (b): accept and proceed to Phase 2.
+  If they provide a path (a): use it for Step 2.
+
+  **If user picks (d) — sample resume fallback:**
+
+  Load the sample resume using the best available method (stop at first success):
+
+  1. Attempt DOCX extraction via pandoc:
+     ```
+     Bash: pandoc "./resume/Sample ATS Resume Template.docx" -t plain 2>/dev/null
+     ```
+     If output is non-empty: use as base resume content.
+
+  2. If pandoc unavailable or output empty, fall back to the sample PDF:
+     ```
+     Read ./resume/Sample ATS Resume Template.pdf
+     ```
+     (pass `pages: "1-5"` to limit extraction)
+
+  3. If both fail, fall back to the Markdown template:
+     ```
+     Read ./resume/base-resume-template.md
+     ```
+     Warn: *"The sample template contains placeholder fields like [Full Name]. The tailored output will demonstrate structure and format but won't reflect real experience."*
+
+  After loading any sample variant, print:
+  > "⚑ Demo mode — using built-in sample ATS resume. Output will demonstrate the skill's capabilities with a fictional candidate profile. Replace `~/resume/base-resume.md` with your own resume for a real run."
+
+  Proceed to Phase 2 with the sample as base resume.
 
 **Step 2 — Load by file extension**
 
@@ -115,7 +169,31 @@ Do not advance to Phase 2 until both JD and base resume are in context.
 
 ---
 
-## Phase 2 — Analyze the job description
+## Phase 2 — Intelligence
+
+### Step 1 — Company research
+
+Extract the company name from the JD. Attempt to research the company via WebFetch. All fetches are best-effort — failures never block this phase.
+
+Attempt in order; stop after 2 successful fetches (>200 characters, no sign-in/access-denied wall):
+1. `WebFetch https://www.{company}.com/about` — prompt: *"Extract company mission, product focus, engineering culture signals, team structure, and technology mentions."*
+2. `WebFetch https://engineering.{company}.com` (or `https://{company}.engineering`) — prompt: *"Extract engineering culture signals, technical focus areas, technologies, architectural choices, and engineering values."*
+3. `WebFetch https://www.{company}.com/careers` (fallback if both above fail) — prompt: *"Extract culture signals, engineering team descriptions, stated values, and technology mentions."*
+
+If all fetches fail or return blocked/empty responses: set Source_confidence = LOW and proceed silently without mentioning the failure to the user.
+
+Output `COMPANY INTELLIGENCE` block:
+```
+COMPANY INTELLIGENCE
+────────────────────
+Mission/value prop: [1 sentence | "not fetched"]
+Engineering culture: [key signals: speed/rigor/autonomy/scale | "inferred from JD only"]
+Public tech stack: [technologies from blog/about | "none found"]
+Domain terminology: [company-specific words/phrases]
+Source confidence: HIGH | PARTIAL | LOW
+```
+
+### Step 2 — JD analysis
 
 Load `references/job-analysis.md`.
 
@@ -134,85 +212,149 @@ Output the `JD ANALYSIS` block defined in `references/job-analysis.md §Output f
 
 ---
 
-## Phase 3 — Match resume against JD
+## Phase 3 — Fit Scoring
 
 Load `references/ats-optimization.md`.
 
-Compare the base resume against the Phase 2 output. For each hard and soft requirement:
+### Step 1 — Target profile synthesis
 
-- **Strong match:** requirement directly addressed in base resume — note which section/bullet
-- **`[GAP-ADJACENT]`:** JD requires X; base resume has a related parent, sibling, or co-occurring skill Y — eligible for Phase 4 inference
-- **`[GAP-DIRECT]`:** JD requires X; no hook whatsoever in the base resume — cannot infer; will become `<!-- TODO -->`
-- **Reframeable:** experience that addresses a requirement but in different language — note `Original → Reframed → Maps to: [requirement]`
-- **Emphasis shifts:** sections/bullets to move up (directly address high-weight requirements) or compress (not relevant)
+Internally synthesize a 3–5 sentence ideal candidate profile combining JD hard/soft requirements, culture signals, and COMPANY INTELLIGENCE data. Do not print this — it is your scoring baseline only.
 
-Output:
+### Step 2 — Score every requirement
+
+For each hard and soft JD requirement, score four dimensions on a 0–100 scale:
+
+| Dimension | Weight | 100 means... |
+|---|---|---|
+| Direct | 0.4 | Resume explicitly names/demonstrates this exact requirement |
+| Transferable | 0.3 | Same outcome or domain knowledge via a different path |
+| Adjacent | 0.2 | Co-occurring, parent, or sibling skill implies exposure |
+| Impact | 0.1 | Measurable or concrete results in the relevant domain |
+
+Formula: `Overall = (Direct × 0.4) + (Transferable × 0.3) + (Adjacent × 0.2) + (Impact × 0.1)`
+
+Confidence bands:
+| Band | Range | Routing |
+|---|---|---|
+| DIRECT | 90–100% | No changes needed — preserve and emphasize |
+| TRANSFERABLE | 75–89% | Reframe existing bullet in Phase 5 |
+| ADJACENT | 60–74% | HIGH/MEDIUM inference in Phase 4 |
+| WEAK | 45–59% | LOW inference in Phase 4; require user confirmation |
+| GAP | <45% | `<!-- TODO -->` comment in resume; flagged in report |
+
+### Step 3 — Output FIT ASSESSMENT block
+
 ```
-MATCH ANALYSIS
+FIT ASSESSMENT
 ──────────────
-Strong matches: [list]
-[GAP-ADJACENT] [requirement]: base has [adjacent skill] — eligible for inference
-[GAP-DIRECT] [requirement]: no coverage — will flag as TODO
-Reframeable: [Original] → [Reframed] (maps to [requirement])
-Emphasis up: [list]
-Compress: [list]
-Current ATS coverage: X/N hard keywords (Y%)
+Overall role fit: X% (weighted avg across hard requirements)
+
+Scores:
+  [Req] — DIRECT (96%):        D:95 T:90 A:85 I:90
+  [Req] — TRANSFERABLE (82%):  D:70 T:92 A:70 I:80
+  [Req] — ADJACENT (65%):      D:40 T:70 A:85 I:60
+  [Req] — WEAK (52%):          D:30 T:55 A:65 I:40
+  [Req] — GAP (22%):           D:10 T:20 A:30 I:15
+
+By band:
+  DIRECT:       [list]
+  TRANSFERABLE: [list — one-line reframing note each]
+  ADJACENT:     [list — HIGH/MEDIUM inference in Phase 4]
+  WEAK:         [list — LOW inference, user confirmation required]
+  GAP:          [list — TODO in resume]
+
+Emphasis: move up [list] | compress [list]
+ATS hard keyword coverage: X/N (Y%)
 ```
 
 ---
 
-## Phase 4 — Adjacent skill inference
+## Phase 3.5 — Gap Discovery (optional)
+
+**Trigger:** Skip silently if Phase 3 shows only DIRECT and TRANSFERABLE requirements. Run if any ADJACENT, WEAK, or GAP items exist.
+
+**Opening prompt:**
+> "I found [N] requirements your resume doesn't fully cover. A short interview (5-10 min) can surface undocumented experience — side projects, informal work, cross-team contributions — that might close these gaps.
+>
+> Type 'skip' to proceed directly, or press Enter to start."
+
+**If user skips (types 'skip', 's', 'no', or presses Enter with a negative):** advance to Phase 4 using Phase 3 bands unchanged.
+
+**Interview rules:**
+- Generate questions from actual gap requirements only — no generic questions
+- One question at a time; wait for each response before asking the next
+- Max 10 questions; stop early on "done", "that's all", or a clearly negative response
+- Minimum 3 questions if gaps exist
+
+**Question patterns (adapt to each actual requirement):**
+- "Your resume doesn't show [req]. Have you worked with it or something equivalent, even informally or outside a job role?"
+- "At [most recent company from resume], did you touch [gap area] outside your primary responsibilities?"
+- "Any side projects, open-source work, or coursework involving [req]?"
+
+**After interview, output `DISCOVERY NOTES` block:**
+```
+DISCOVERY NOTES
+───────────────
+[Req]: "[brief user quote]" → Reclassified: TRANSFERABLE
+[Req]: No new information → GAP (unchanged)
+```
+
+Reclassify bands based on user answers immediately. Phase 4 uses post-interview bands only.
+
+---
+
+## Phase 4 — Content Augmentation
 
 Load `references/skill-inference.md`.
 
-For every `[GAP-ADJACENT]` from Phase 3, apply the adjacency taxonomy and confidence rules from the reference file:
+Process ADJACENT, WEAK, and GAP items in a single pass to generate all content additions.
 
+**Step 1 — Skill inference (ADJACENT and WEAK bands)**
+
+For each requirement in the ADJACENT or WEAK band (using post-Phase 3.5 bands):
 1. Classify the relationship: parent/child, sibling, co-occurrence, or domain transfer
 2. Assign confidence: HIGH / MEDIUM / LOW
 3. Generate content appropriate to confidence level:
    - **HIGH:** auto-include; write exact-match language
-   - **MEDIUM:** auto-include; use "familiar with" or "exposure to" language; mark clearly
-   - **LOW:** do not auto-include; present as a suggestion requiring user confirmation
+   - **MEDIUM:** auto-include; hedge with "familiar with" or "exposure to"
+   - **LOW (WEAK band):** do not auto-include; present to user for confirmation
 4. Mark every generated item: `<!-- GENERATED: based on <basis> | confidence: HIGH/MEDIUM | verify before submitting -->`
 
-Never generate: new job titles, employers, education entries, certifications, fabricated metrics, or leadership claims without explicit base in the profile.
+Never generate: new job titles, employers, education entries, certifications, fabricated metrics, or leadership claims without explicit basis in the profile.
 
-Output:
+**Step 2 — Profile enrichment (GAP items)**
+
+Re-examine each remaining GAP requirement using enrichment signals from the full profile context:
+- Technology co-occurrence (Lambda + API Gateway → serverless architecture patterns)
+- Domain transfer (fintech → compliance/fraud awareness; healthcare → data privacy; B2B SaaS → enterprise customer empathy)
+- Latent scope signals (small startup → 0-to-1 experience, breadth ownership)
+
+If enrichment provides a new basis: reclassify to ADJACENT at LOW confidence and prompt user for confirmation before including.
+
+**Output `AUGMENTATION RESULTS` block:**
 ```
-INFERENCE RESULTS
-─────────────────
-[GAP-ADJACENT] Kubernetes: base has Docker + ECS
-  → Confidence: MEDIUM
-  → Generated: "Containerized services using Docker and ECS; familiar with Kubernetes orchestration patterns"
-  → Placement: Skills section + [Company] bullet expansion
+AUGMENTATION RESULTS
+────────────────────
+[Req] ADJACENT — Inference:
+  Basis: Docker + ECS → Kubernetes
+  Confidence: MEDIUM
+  Generated: "familiar with Kubernetes orchestration patterns"
+  Placement: Skills + [Company] bullet expansion
 
-[GAP-ADJACENT] scikit-learn: base has NumPy + pandas
-  → Confidence: HIGH
-  → Generated: "scikit-learn" added to Skills
-  → Placement: Skills under "ML Libraries"
+[Req] WEAK — Enrichment reclassified → ADJACENT:
+  Basis: fintech domain → compliance/fraud awareness
+  Confidence: LOW → [awaiting user confirmation]
 
-[LOW — needs confirmation] GraphQL: base has REST APIs
-  → Suggest to user: "You have REST experience — should I add 'exposure to GraphQL' to Skills? Confirm y/n."
+[LOW — confirm y/n] "exposure to GraphQL" — based on REST API background
+
+Remaining GAP items (no basis found): [list — will become TODO comments in Phase 5]
 ```
 
-After outputting all inference results, pause for LOW-confidence confirmations before proceeding.
+Pause for all LOW-confidence confirmations before proceeding to Phase 5.
 
 ---
 
-## Phase 5 — Profile enrichment
-
-Using all context gathered (JD analysis, base resume, inference results), build an enriched candidate profile:
-
-- **Technology co-occurrence:** if profile has A and B, infer awareness of C (e.g., `Lambda + API Gateway` → serverless architecture patterns)
-- **Domain transfer:** map company domain to implied knowledge (fintech → compliance/auditability/fraud awareness; healthcare → data privacy; B2B SaaS → enterprise customer empathy)
-- **Latent scope signals:** derive from company stage/team size in base resume (e.g., "led at a 10-person startup" implies 0-to-1 experience, breadth ownership)
-- **Re-check remaining `[GAP-DIRECT]` items:** if any enrichment now provides a basis, reclassify to `[GAP-ADJACENT]` and generate at LOW confidence (with user confirmation)
-
-Output the `ENRICHED PROFILE` block: each enrichment, its basis, and where it will be surfaced in the resume.
-
----
-
-## Phase 6 — Generate the tailored resume
+## Phase 5 — Resume Assembly
 
 Load `references/resume-writing.md`.
 
@@ -240,63 +382,146 @@ Produce the complete tailored resume in Markdown using the following rules:
 - Standard English section headers: "Work Experience", "Education", "Skills", "Projects", "Certifications", "Summary"
 - Every `[HARD]` keyword must appear in plain body text at least once
 
-For remaining `[GAP-DIRECT]` items with no generation basis, insert: `<!-- TODO: Add <requirement> if applicable — listed as required, no coverage found in base resume -->`
+For remaining [GAP] items with no generation basis, insert: `<!-- TODO: Add <requirement> if applicable — listed as required, no coverage found in base resume -->`
+
+**Compile tailoring report (written to file in Phase 6):**
+
+Assemble in memory — do not print in conversation. Phase 6 writes it to `./tailored/<base>-report.md`.
+
+Report structure:
+```markdown
+# Resume Tailoring Report
+Company: [company] | Role: [role] | Date: [date]
+Tailored resume: [base].md
+
+## Fit Scores
+| Band | Count | Requirements |
+|---|---|---|
+| DIRECT | N | [list] |
+| TRANSFERABLE | N | [list] |
+| ADJACENT | N | [list] |
+| WEAK | N | [list] |
+| GAP | N | [list] |
+Hard requirements covered (DIRECT+TRANSFERABLE): N/M (X%)
+Overall role fit score: X%
+
+## Reframings Applied
+[Original bullet] → [Reframed] — maps to [JD req]
+
+## Generated Additions (verify before submitting)
+[HIGH/MEDIUM] "[text]" — based on [basis]
+
+## Thin Coverage (WEAK — not auto-generated)
+[req]: [partial basis] — address in cover letter or prep for interview
+
+## Gaps (no basis found)
+[req]: flagged as TODO — address in cover letter; prepare to explain in interview
+
+## Interview Prep
+- Expected interview topics: [from seniority signals + ownership language in JD]
+- Verbal gap coverage: [GAP and WEAK band items to address in conversation]
+- Company context: [from COMPANY INTELLIGENCE — culture, tech focus, recent news]
+- Questions to prepare: 3-5 specific questions based on JD + company profile
+
+## Company Intelligence
+[Copy of COMPANY INTELLIGENCE block from Phase 2]
+```
 
 ---
 
-## Phase 7 — Write output and report
+## Phase 6 — Delivery
 
-**Determine filename:**
+**Filename base:**
 ```
 Bash: date +%Y-%m-%d
 ```
-Sanitize company and title to lowercase-hyphen (strip specials, replace spaces). Path: `./tailored/<company>-<role>-<date>.md`
+Sanitize company and role to lowercase-hyphen (strip specials, collapse spaces, max 30 chars each). Base name: `<company>-<role>-<date>` (e.g., `stripe-senior-swe-2026-07-20`).
 
-**Create output directory:**
+**Step 1 — Markdown (always)**
 ```
 Bash: mkdir -p ./tailored
+Write ./tailored/<base>.md
 ```
 
-**Write the resume:**
-`Write ./tailored/<company>-<role>-<date>.md` with the full tailored resume.
+**Step 2 — Report (always)**
+```
+Write ./tailored/<base>-report.md
+```
+Content: the TAILORING REPORT assembled at the end of Phase 5.
 
-**Print the summary (in conversation only — not saved to file):**
+**Step 3 — DOCX (if FORMAT_PREF includes docx or all)**
+```
+Bash: pandoc ./tailored/<base>.md -o ./tailored/<base>.docx 2>&1 && echo DOCX_OK || echo DOCX_FAILED
+```
+- `DOCX_OK`: confirm `"DOCX generated: ./tailored/<base>.docx"`
+- `DOCX_FAILED` + pandoc missing: print install instructions (brew/apt/winget) + note Markdown path as fallback
+- `DOCX_FAILED` + pandoc present: show error output; suggest running `pandoc <base>.md -o <base>.docx` manually from `./tailored/`
+
+**Step 4 — PDF (if FORMAT_PREF includes pdf or all)**
+
+Attempt three methods in order; stop at first success:
+
+Method A — pandoc + xelatex (best typographic quality):
+```
+Bash: pandoc ./tailored/<base>.md -o ./tailored/<base>.pdf --pdf-engine=xelatex 2>&1 && echo PDF_OK || echo PDF_A_FAILED
+```
+
+Method B — pandoc + wkhtmltopdf (if A failed):
+```
+Bash: pandoc ./tailored/<base>.md -o ./tailored/<base>.pdf --pdf-engine=wkhtmltopdf 2>&1 && echo PDF_OK || echo PDF_B_FAILED
+```
+
+Method C — LibreOffice from DOCX (if B failed AND `<base>.docx` was successfully generated in Step 3):
+```
+Bash: libreoffice --headless --convert-to pdf ./tailored/<base>.docx --outdir ./tailored/ 2>&1 && echo PDF_OK || echo PDF_C_FAILED
+```
+
+All methods failed — manual options:
+> "PDF generation failed. Options:
+> - **Best quality:** `brew install --cask mactex` then `pandoc <base>.md -o <base>.pdf --pdf-engine=xelatex`
+> - **Easiest:** open `<base>.docx` in Word or LibreOffice → File → Export as PDF
+> - **No install:** upload `<base>.md` at pandoc.org/try/ and download as PDF"
+
+**Step 5 — Summary (printed in conversation only, not saved to file)**
 
 ```
-RESUME TAILORING COMPLETE
-═════════════════════════
-Output: ./tailored/<filename>
+TAILORING COMPLETE
+══════════════════
+Files written:
+  ./tailored/<base>.md
+  ./tailored/<base>-report.md
+  [./tailored/<base>.docx — if generated]
+  [./tailored/<base>.pdf  — if generated]
 
-ATS Keyword Coverage
-────────────────────
-Hard requirements matched: N/M (X%)
-Soft requirements matched: N/M (X%)
+Role fit: X% | DIRECT: N | TRANSFERABLE: N | ADJACENT: N | WEAK: N | GAP: N
+Hard keyword coverage: X/N (Y%)
 
-Original Changes (from base resume)
-────────────────────────────────────
+Changes
+───────
 Summary: rewrote to lead with [seniority+domain]; injected [keywords]
 Skills: reordered to front-load [list]; removed [list]
 [Company/Role] bullets: reframed N bullets; injected [keywords]
 Moved [Section] up — addresses [hard requirement]
-Compressed [older role] to 2 bullets
 
-Generated Additions (review before submitting)
-───────────────────────────────────────────────
-[HIGH] "scikit-learn" added to Skills — based on NumPy/pandas; verify you've used it
-[MEDIUM] Expanded [Company] bullet to include Kubernetes familiarity — based on Docker/ECS; verify claim accuracy
-[LOW] Suggested "GraphQL exposure" — not auto-included; confirm y/n
+Generated Additions (verify before submitting)
+──────────────────────────────────────────────
+[HIGH] "[text]" — based on [basis]
+[MEDIUM] "[text]" — based on [basis]; hedged language
 
-Gaps (no coverage, address in cover letter)
-────────────────────────────────────────────
-<!-- TODO --> <requirement>: no basis in profile
+Gaps
+────
+[requirement]: no basis — TODO in resume; address in cover letter
 
 Next Steps
 ──────────
-1. Open ./tailored/<filename> — grep for GENERATED and TODO comments; review each one
-2. Verify every metric is accurate before submitting
-3. Convert to .docx or clean PDF before uploading to ATS systems (Markdown renders poorly in most parsers)
-4. Write a targeted cover letter addressing [top culture signal from JD]
+1. Open ./tailored/<base>-report.md — full scores, reframings, interview prep
+2. Grep <base>.md for GENERATED and TODO before submitting
+3. Verify all metrics are accurate
+4. Write a cover letter targeting [top culture/gap signal from report]
 ```
+
+If this was a demo run (user chose option d in Phase 1), prepend to the summary:
+> "⚑ Demo run — output is based on the built-in sample resume, not your own profile."
 
 ---
 
@@ -306,6 +531,8 @@ Next Steps
 >
 > **1. Job description** — paste it directly, give me a local file path, share a LinkedIn or job-board URL, or describe the role (company, title, key requirements).
 >
-> **2. Your base resume** — I'll look for `~/resume/base-resume.md` automatically. You can also give me a path to a `.md`, `.txt`, `.pdf`, or `.docx` file, or paste the content directly. No resume yet? Copy `resume/base-resume-template.md` from this plugin and fill it in.
+> **2. Your base resume** — I'll look for `~/resume/base-resume.md` automatically. You can also give me a path to a `.md`, `.txt`, `.pdf`, or `.docx` file, or paste the content directly. No resume yet? Copy `resume/base-resume-template.md` from this plugin and fill it in — or choose the built-in sample resume for a demo run.
 >
 > What role are you applying for?
+>
+> *Optional: specify output format — Markdown (default), DOCX, PDF, or all. Example: "tailor my resume for this role, output as PDF"*
