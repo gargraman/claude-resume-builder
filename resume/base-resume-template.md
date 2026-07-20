@@ -103,11 +103,3 @@
 - **[Conference Name, YYYY]** — "[Talk Title]" — [Link if recorded]
 
 ---
-
-<!--
-  NOTES FOR THE RESUME-BUILDER SKILL:
-  - Never edit this file when tailoring for a JD.
-  - Output goes to ./tailored/<company>-<role>-YYYY-MM-DD.md
-  - After reviewing output, action all <!-- TODO --> and <!-- GENERATED --> comments
-  - Update metrics here after each milestone — specific numbers make tailoring much stronger
--->
