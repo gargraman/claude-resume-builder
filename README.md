@@ -232,4 +232,4 @@ MIT
 
 ## Disclaimer
 
-Not affiliated with Anthropic. This skill rewrites resume language and may infer adjacent skills — every claim in the final output remains your responsibility to verify. Review all `<!-- GENERATED -->` and `<!-- TODO -->` comments before submitting to any employer. The presence of a keyword in your resume does not guarantee an interview.
+Not affiliated with Anthropic. This skill rewrites resume language and may infer adjacent skills
