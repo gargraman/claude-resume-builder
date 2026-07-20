@@ -10,10 +10,11 @@ description: >-
   description as pasted text, a local file path (.txt or .md), a LinkedIn or
   job-board URL (fetched automatically), or a plain-language role description
   (company, title, key requirements). Reads the base resume from
-  ~/resume/base-resume.md or a custom path. Produces a tailored Markdown
-  resume saved to ./tailored/<company>-<role>-YYYY-MM-DD.md, plus a
-  conversation summary showing ATS keyword coverage, gaps, inferred skill
-  additions, and every change made.
+  ~/resume/base-resume.md or a custom path; supports .md, .txt, .pdf, and
+  .docx resume formats. Produces a tailored Markdown resume saved to
+  ./tailored/<company>-<role>-YYYY-MM-DD.md, plus a conversation summary
+  showing ATS keyword coverage, gaps, inferred skill additions, and every
+  change made.
 version: 1.0.0
 argument-hint: "<paste JD | /path/to/jd.txt | https://linkedin.com/jobs/... | 'Senior SWE at Stripe, 5+ yrs, distributed systems'>"
 allowed-tools: Read Write Bash WebFetch
@@ -67,20 +68,48 @@ After ingestion: `"JD loaded — [Company] / [Title]. Locating base resume..."`
 
 ## Phase 1 — Load base resume
 
-Check for the default resume path:
+**Step 1 — Determine the resume path**
 
+Check for the default:
 ```
 Bash: ls ~/resume/base-resume.md 2>/dev/null && echo FOUND || echo MISSING
 ```
 
-- **FOUND:** `Read ~/resume/base-resume.md`. Confirm with `"Base resume loaded ([N] lines)."`
-- **MISSING:** Offer three options:
+- **FOUND:** path is `~/resume/base-resume.md` — proceed to Step 2.
+- **MISSING:** ask:
   > "No resume found at `~/resume/base-resume.md`. Choose:
-  > (a) Provide the path to your resume file.
+  > (a) Provide the path to your resume file (.md, .txt, .pdf, or .docx).
   > (b) Paste your resume content directly.
   > (c) Need a template? Copy `resume/base-resume-template.md` from this plugin, fill it in, save to `~/resume/base-resume.md`, then re-run."
 
-  If they give a path: `Read` it. If that fails too, ask to paste. Accept pasted content and proceed.
+  If they paste content: accept and proceed to Phase 2. Otherwise use the provided path for Step 2.
+
+**Step 2 — Load by file extension**
+
+Detect the extension of the resume path and extract accordingly:
+
+**`.md` or `.txt`:** `Read <path>`. If the file is missing, ask the user to paste instead.
+
+**`.pdf`:** `Read <path>` — the Read tool handles PDFs natively (pass `pages: "1-20"` if the file exceeds 10 pages, to capture the full resume). Confirm: `"Resume PDF loaded."`
+
+**`.docx`:** Extract text using the best available tool. Try pandoc first:
+```
+Bash: pandoc "<path>" -t plain 2>/dev/null
+```
+If the output is non-empty (not blank or an error message): use that text as the resume content.
+If pandoc is not installed or the output is empty, try python:
+```
+Bash: python3 -c "import docx2txt; print(docx2txt.process('<path>'))" 2>/dev/null
+```
+If that also produces non-empty output: use it.
+If both tools fail, tell the user:
+> "Could not extract text from the .docx file — neither `pandoc` nor `docx2txt` is available.
+> Fix options: `brew install pandoc` (macOS) / `pip install docx2txt`
+> Alternatively: export your resume from Word as PDF or save as plain text, then give me that path. Or paste the content directly."
+
+**Other extension:** attempt `Read <path>` as plain text. If it returns binary or unreadable content, ask the user to convert to `.md`, `.txt`, `.pdf`, or `.docx`.
+
+Confirm load with: `"Base resume loaded ([format: md/txt/pdf/docx])."`
 
 Do not advance to Phase 2 until both JD and base resume are in context.
 
@@ -277,6 +306,6 @@ Next Steps
 >
 > **1. Job description** — paste it directly, give me a local file path, share a LinkedIn or job-board URL, or describe the role (company, title, key requirements).
 >
-> **2. Your base resume** — I'll look for `~/resume/base-resume.md` automatically. If it's elsewhere, give me the path or paste the content. No resume yet? Copy `resume/base-resume-template.md` from this plugin and fill it in.
+> **2. Your base resume** — I'll look for `~/resume/base-resume.md` automatically. You can also give me a path to a `.md`, `.txt`, `.pdf`, or `.docx` file, or paste the content directly. No resume yet? Copy `resume/base-resume-template.md` from this plugin and fill it in.
 >
 > What role are you applying for?

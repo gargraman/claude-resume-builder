@@ -13,7 +13,7 @@ A [Claude Code](https://claude.com/claude-code) plugin that tailors your resume 
 | Phase | What happens |
 |---|---|
 | 0 — Ingest JD | Accept JD as pasted text, local file, URL, or plain-language description |
-| 1 — Load resume | Read `~/resume/base-resume.md` or a custom path |
+| 1 — Load resume | Read `~/resume/base-resume.md` or a custom path (.md, .txt, .pdf, .docx) |
 | 2 — Analyze JD | Extract hard/soft requirements, ATS keywords, seniority signals, culture flags |
 | 3 — Match | Compare resume vs JD; classify each gap as direct or inference-eligible |
 | 4 — Infer adjacent skills | Generate plausible additions for related skills; HIGH/MEDIUM auto-include; LOW requires confirmation |
@@ -90,7 +90,17 @@ cp resume/base-resume-template.md ~/resume/base-resume.md
 # Edit ~/resume/base-resume.md with your own information
 ```
 
-The skill reads `~/resume/base-resume.md` by default. Override with any path or paste content directly when invoking.
+The skill reads `~/resume/base-resume.md` by default. You can override with any supported format:
+
+| Format | How it's read |
+|---|---|
+| `.md` / `.txt` | Read directly |
+| `.pdf` | Read natively — no extra tools needed |
+| `.docx` | Extracted via `pandoc` (preferred) or `docx2txt` — install either one |
+
+If neither pandoc nor docx2txt is installed and you have a `.docx` resume, the skill will tell you exactly what to install (`brew install pandoc` on macOS) or offer to accept pasted content instead.
+
+You can also paste your resume content directly in the conversation — no file required.
 
 ---
 
