@@ -1,7 +1,7 @@
 {
   "name": "resume-builder",
-  "description": "Tailors resumes for specific job descriptions with ATS keyword optimization, adjacent skill inference, gap analysis, and professional rewriting",
-  "version": "1.0.0",
+  "description": "Tailors resumes for specific job descriptions with ATS keyword optimization, adjacent skill inference, gap analysis, professional rewriting, multi-source intake (LinkedIn/GitHub/notes), and an optional cover letter",
+  "version": "2.1.0",
   "author": {
     "name": "Raman Garg"
   },
