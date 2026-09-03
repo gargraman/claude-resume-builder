@@ -1,6 +1,6 @@
 # claude-resume-builder-skill
 
-A [Claude Code](https://claude.com/claude-code) plugin that tailors your resume for a specific job description — with ATS keyword optimization, adjacent skill inference, gap analysis, and professional rewriting. Built to be shared publicly.
+A [Claude Code](https://claude.com/claude-code) plugin that tailors your resume for a specific job description — with ATS keyword optimization, adjacent skill inference, gap analysis, and professional rewriting. It can pull in supplementary sources (LinkedIn profile, GitHub repos, pasted notes), optionally draft a short cover letter, and it reviews your resume with a blunt, no-sugar-coating recruiter voice rather than rubber-stamping it. Built to be shared publicly.
 
 > **Hard limits:** This skill rewrites language, reorders sections, and infers adjacent skills — it does not fabricate job history, education, certifications, or numeric metrics. Review every `<!-- GENERATED -->` and `<!-- TODO -->` comment before submitting to any employer.
 
@@ -13,13 +13,13 @@ A [Claude Code](https://claude.com/claude-code) plugin that tailors your resume 
 | Phase | What happens |
 |---|---|
 | 0 — Ingest JD | Accept JD as pasted text, local file, URL, or plain-language description |
-| 1 — Load resume | Read `~/resume/base-resume.md` or a custom path (.md, .txt, .pdf, .docx) |
+| 1 — Load resume | Read `~/resume/base-resume.md` or a custom path (.md, .txt, .pdf, .docx); optionally merge supplementary sources — LinkedIn profile, GitHub repos, pasted notes |
 | 2 — Analyze JD | Extract hard/soft requirements, ATS keywords, seniority signals, culture flags |
 | 3 — Match | Compare resume vs JD; classify each gap as direct or inference-eligible |
 | 4 — Infer adjacent skills | Generate plausible additions for related skills; HIGH/MEDIUM auto-include; LOW requires confirmation |
 | 5 — Enrich profile | Derive latent expertise from co-occurrences, domain context, and company stage |
 | 6 — Generate resume | Produce full tailored Markdown with section reordering, bullet rewriting, and ATS compliance |
-| 7 — Write output | Save to `./tailored/<company>-<role>-YYYY-MM-DD.md`; print ATS score + change log |
+| 7 — Write output | Save to `./tailored/<company>-<role>-YYYY-MM-DD.md`; optionally emit DOCX/PDF and an opt-in short cover letter; print ATS score + change log |
 
 ### What gets optimized
 - ATS keyword coverage — every hard requirement must appear in the body
@@ -28,12 +28,19 @@ A [Claude Code](https://claude.com/claude-code) plugin that tailors your resume 
 - Professional summary scoped to this specific company and role
 - Skills section restructured to front-load JD-matching technologies
 - Adjacent skills inferred from what you already know (marked transparently)
+- Real evidence from supplementary sources (LinkedIn, GitHub repos, pasted notes) preferred over inference, with provenance tracked
+
+### Optional extras
+- **Supplementary sources** — supply a LinkedIn profile URL, GitHub profile/repos, or pasted notes; the skill folds verifiable detail into the working profile. LinkedIn often blocks automated fetches, so it falls back to asking you to paste or export. Forked/starred GitHub repos are not treated as your own work without confirmation.
+- **Short cover letter** — offered at the end of a run (default off). ~150 words, grounded only in your profile and the fetched company intel, held to the same anti-fabrication rules as the resume.
+- **Honest review voice** — the skill critiques the resume directly (weak bullets, buried titles, over/under-leveling) and presents options rather than silently choosing.
 
 ### What it will not do
 - Create new job titles, employers, education entries, or certifications
 - Fabricate numeric metrics (%, $, team sizes, user counts)
 - Submit anything on your behalf
 - Include LOW-confidence inferences without your explicit confirmation
+- Present unverified supplementary-source items (e.g. a forked or starred GitHub repo) as your own work without confirmation
 
 ---
 
@@ -148,6 +155,7 @@ After running, you get:
 ```
 ./tailored/stripe-senior-software-engineer-2026-07-20.md
 ```
+Plus a `-report.md` sidecar (ATS coverage, gaps, interview prep), optional `.docx`/`.pdf`, and — if you accept the prompt — `-cover-letter.md`.
 
 **2. In-conversation summary:**
 ```
@@ -183,6 +191,7 @@ Next Steps
 2. Grep for GENERATED and TODO — review every comment
 3. Verify all metrics are accurate before submitting
 4. Convert to .docx or clean PDF before uploading to ATS
+5. Accept the cover-letter prompt if you want a short tailored draft
 ```
 
 ---
@@ -206,6 +215,7 @@ resume/
   base-resume-template.md            Generic Markdown resume template — copy to ~/resume/base-resume.md
 
 README.md                            This file
+ROADMAP.md                           Planned capabilities, benchmarked against 2026 recruiting reality
 ```
 
 ---
@@ -219,6 +229,8 @@ PRs are welcome. Good areas to contribute:
 - **Reframing pattern examples** in `references/resume-writing.md` for more domain combinations
 - **ATS system profiles** — behavior differences across Greenhouse, Workday, Lever, iCIMS, Taleo
 - **Bug reports** — edge cases in JD parsing, inference misclassifications, formatting issues
+
+See [ROADMAP.md](ROADMAP.md) for planned capabilities (benchmarked against 2026 recruiting reality) and where each would land in the codebase — a good place to find a contribution.
 
 Open an issue before changing the core 7-phase workflow or the hard generation limits.
 
